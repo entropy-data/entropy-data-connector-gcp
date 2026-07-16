@@ -285,6 +285,11 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
       return null;
     }
 
+    if (servers instanceof Map) {
+      log.warn("Data contract {} uses the deprecated DCS format, which is not supported; migrate it to ODCS", dataContractId);
+      return null;
+    }
+
     // Open Data Contract Standard (ODCS): servers is a List with "server" field as the name
     if (servers instanceof List) {
       var serversList = (List<Map<String, Object>>) servers;

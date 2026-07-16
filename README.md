@@ -7,6 +7,7 @@ The connector for GCP is a Spring Boot application that uses the [entropy-data-s
 
 - **Asset Synchronization**: Sync tables and datasets of BigQuery projects to Entropy Data as Assets.
 - **Access Management**: Listen for AccessActivated and AccessDeactivated events in Entropy Data and grants access on BigQuery datasets to the data consumer.
+  The BigQuery server (project and dataset) is resolved from the data contract linked by the provider output port, which must be in ODCS (Open Data Contract Standard) format; the legacy Data Contract Specification (DCS) is not supported.
 
 ## Usage
 
