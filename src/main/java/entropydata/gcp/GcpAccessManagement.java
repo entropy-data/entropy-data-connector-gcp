@@ -6,9 +6,11 @@ import com.google.cloud.bigquery.Acl.Group;
 import com.google.cloud.bigquery.Acl.User;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.DatasetId;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import entropydata.sdk.EntropyDataClient;
 import entropydata.sdk.EntropyDataEventHandler;
+import entropydata.sdk.client.ApiException;
 import entropydata.sdk.client.model.Access;
 import entropydata.sdk.client.model.AccessActivatedEvent;
 import entropydata.sdk.client.model.AccessDeactivatedEvent;
@@ -269,33 +271,18 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
     // Get the contractServer name - DPS uses custom field, ODPS uses customProperties
     var contractServerName = getOutputPortCustomField(outputPort, "contractServer");
 
-    // Fetch the data contract
+    // Fetch the data contract untyped to stay independent of the bundled SDK model version
     Map<String, Object> dataContractMap;
     try {
-      var rawDataContract = client.getDataContractsApi().getDataContract(dataContractId);
-      dataContractMap = objectMapper.convertValue(rawDataContract, Map.class);
+      dataContractMap = fetchDataContractAsMap(dataContractId);
     } catch (Exception e) {
-      log.debug("Failed to fetch data contract {}: {}", dataContractId, e.getMessage());
+      log.warn("Failed to fetch data contract {}: {}", dataContractId, e.getMessage());
       return null;
     }
 
     var servers = dataContractMap.get("servers");
     if (servers == null) {
       return null;
-    }
-
-    // Data Contract Specification (DCS): servers is a Map<String, Server>
-    if (servers instanceof Map) {
-      var serversMap = (Map<String, Map<String, Object>>) servers;
-      Map<String, Object> server;
-      if (contractServerName != null && serversMap.containsKey(contractServerName)) {
-        server = serversMap.get(contractServerName);
-      } else {
-        server = serversMap.values().stream().findFirst().orElse(null);
-      }
-      if (server != null) {
-        return toStringMap(server);
-      }
     }
 
     // Open Data Contract Standard (ODCS): servers is a List with "server" field as the name
@@ -315,6 +302,25 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
     }
 
     return null;
+  }
+
+  private Map<String, Object> fetchDataContractAsMap(String dataContractId) throws ApiException {
+    var apiClient = client.getApiClient();
+    var path = "/api/datacontracts/" + apiClient.escapeString(dataContractId);
+    return apiClient.invokeAPI(
+        path,
+        "GET",
+        new ArrayList<>(),
+        new ArrayList<>(),
+        "",
+        null,
+        new HashMap<>(),
+        new HashMap<>(),
+        new HashMap<>(),
+        "application/json",
+        null,
+        new String[] {"ApiKeyAuth", "BearerAuth"},
+        new TypeReference<Map<String, Object>>() {});
   }
 
   @SuppressWarnings("unchecked")

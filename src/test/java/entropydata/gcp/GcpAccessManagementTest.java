@@ -18,22 +18,19 @@ import com.google.cloud.bigquery.Dataset;
 import com.google.cloud.bigquery.DatasetId;
 import entropydata.sdk.EntropyDataClient;
 import entropydata.sdk.client.ApiClient;
+import entropydata.sdk.client.ApiException;
 import entropydata.sdk.client.api.AccessApi;
-import entropydata.sdk.client.api.DataContractsApi;
 import entropydata.sdk.client.api.DataProductsApi;
 import entropydata.sdk.client.api.TeamsApi;
 import entropydata.sdk.client.model.Access;
 import entropydata.sdk.client.model.AccessActivatedEvent;
 import entropydata.sdk.client.model.AccessDeactivatedEvent;
 import entropydata.sdk.client.model.AccessProvider;
-import entropydata.sdk.client.model.DataContract;
-import entropydata.sdk.client.model.DataContractServersValue;
 import entropydata.sdk.client.model.DataUsageAgreementConsumer;
 import entropydata.sdk.client.model.Team;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +45,7 @@ class GcpAccessManagementTest {
   private BigQuery bigQuery;
   private AccessApi accessApi;
   private DataProductsApi dataProductsApi;
-  private DataContractsApi dataContractsApi;
+  private ApiClient apiClient;
   private TeamsApi teamsApi;
   private ObjectMapper objectMapper;
 
@@ -60,20 +57,25 @@ class GcpAccessManagementTest {
     bigQuery = mock(BigQuery.class);
     accessApi = mock(AccessApi.class);
     dataProductsApi = mock(DataProductsApi.class);
-    dataContractsApi = mock(DataContractsApi.class);
     teamsApi = mock(TeamsApi.class);
 
-    var apiClient = mock(ApiClient.class);
+    apiClient = mock(ApiClient.class);
     objectMapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     when(client.getApiClient()).thenReturn(apiClient);
     when(apiClient.getObjectMapper()).thenReturn(objectMapper);
     when(client.getAccessApi()).thenReturn(accessApi);
     when(client.getDataProductsApi()).thenReturn(dataProductsApi);
-    when(client.getDataContractsApi()).thenReturn(dataContractsApi);
     when(client.getTeamsApi()).thenReturn(teamsApi);
 
     accessManagement = new GcpAccessManagement(client, bigQuery, "READER", "gcpPrincipal", "gcpPrincipal");
+  }
+
+  /** Stub the raw data contract fetch to return a YAML fixture as the untyped API response. */
+  private void stubDataContract(String name) throws ApiException {
+    when(apiClient.<Map<String, Object>>invokeAPI(any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(loadYaml(name));
   }
 
   /** Load a YAML fixture file as a Map (simulating a raw API response). */
@@ -84,33 +86,6 @@ class GcpAccessManagementTest {
     } catch (IOException e) {
       throw new RuntimeException("Failed to load fixture: " + name, e);
     }
-  }
-
-  /**
-   * Load an ODCS 3.1.0 data contract YAML and convert to SDK DataContract.
-   * ODCS uses servers as a list; the SDK model uses servers as a Map.
-   * This helper converts the ODCS list format to the DCS Map format
-   * to match what the SDK returns after API deserialization.
-   */
-  @SuppressWarnings("unchecked")
-  private DataContract loadDataContract(String name) {
-    var yaml = loadYaml(name);
-    var servers = yaml.get("servers");
-    if (servers instanceof List) {
-      var serversMap = new LinkedHashMap<String, DataContractServersValue>();
-      for (var entry : (List<Map<String, Object>>) servers) {
-        var serverName = (String) entry.get("server");
-        var serverValue = new DataContractServersValue();
-        entry.forEach((k, v) -> {
-          if (!"server".equals(k)) {
-            serverValue.put(k, v);
-          }
-        });
-        serversMap.put(serverName, serverValue);
-      }
-      yaml.put("servers", serversMap);
-    }
-    return objectMapper.convertValue(yaml, DataContract.class);
   }
 
   private Access buildAccess(String accessId, String providerDpId, String outputPortId,
@@ -190,13 +165,13 @@ class GcpAccessManagementTest {
   class AccessActivatedWithOdpsFormat {
 
     @Test
-    void resolvesServerFromDataContract() {
+    void resolvesServerFromDataContract() throws Exception {
       var consumer = new DataUsageAgreementConsumer().dataProductId("consumer-dp");
       var access = buildAccess("access-1", "provider-dp", "bq-output", consumer);
       when(accessApi.getAccess("access-1")).thenReturn(access);
 
       when(dataProductsApi.getDataProduct("provider-dp")).thenReturn(loadYaml("provider-dp-odps.yaml"));
-      when(dataContractsApi.getDataContract("my-contract")).thenReturn(loadDataContract("datacontract.yaml"));
+      stubDataContract("datacontract.yaml");
       when(dataProductsApi.getDataProduct("consumer-dp")).thenReturn(loadYaml("consumer-dp-odps.yaml"));
 
       var datasetId = DatasetId.of("gcp-project", "gcp-dataset");
@@ -230,13 +205,13 @@ class GcpAccessManagementTest {
     }
 
     @Test
-    void usesFirstServerWhenContractServerNotSpecified() {
+    void usesFirstServerWhenContractServerNotSpecified() throws Exception {
       var consumer = new DataUsageAgreementConsumer().dataProductId("consumer-dp");
       var access = buildAccess("access-1", "provider-dp", "bq-output", consumer);
       when(accessApi.getAccess("access-1")).thenReturn(access);
 
       when(dataProductsApi.getDataProduct("provider-dp")).thenReturn(loadYaml("provider-dp-odps-no-contract-server.yaml"));
-      when(dataContractsApi.getDataContract("my-contract")).thenReturn(loadDataContract("datacontract-multi-server.yaml"));
+      stubDataContract("datacontract-multi-server.yaml");
       when(dataProductsApi.getDataProduct("consumer-dp")).thenReturn(loadYaml("consumer-dp-dps.yaml"));
 
       var datasetId = DatasetId.of("first-project", "first-dataset");
