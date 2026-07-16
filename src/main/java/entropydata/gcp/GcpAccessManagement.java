@@ -271,8 +271,7 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
     // Get the contractServer name - DPS uses custom field, ODPS uses customProperties
     var contractServerName = getOutputPortCustomField(outputPort, "contractServer");
 
-    // Fetch the data contract untyped: the typed SDK model only supports DCS-shaped servers (a map
-    // keyed by server name) and fails to deserialize ODCS contracts, where servers is a list
+    // Fetch the data contract untyped to stay independent of the bundled SDK model version
     Map<String, Object> dataContractMap;
     try {
       dataContractMap = fetchDataContractAsMap(dataContractId);
@@ -284,20 +283,6 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
     var servers = dataContractMap.get("servers");
     if (servers == null) {
       return null;
-    }
-
-    // Data Contract Specification (DCS): servers is a Map<String, Server>
-    if (servers instanceof Map) {
-      var serversMap = (Map<String, Map<String, Object>>) servers;
-      Map<String, Object> server;
-      if (contractServerName != null && serversMap.containsKey(contractServerName)) {
-        server = serversMap.get(contractServerName);
-      } else {
-        server = serversMap.values().stream().findFirst().orElse(null);
-      }
-      if (server != null) {
-        return toStringMap(server);
-      }
     }
 
     // Open Data Contract Standard (ODCS): servers is a List with "server" field as the name
