@@ -13,7 +13,7 @@ import com.google.cloud.bigquery.TableDefinition;
 import entropydata.sdk.EntropyDataAssetsProvider;
 import entropydata.sdk.EntropyDataStateRepositoryInMemory;
 import entropydata.sdk.client.model.Asset;
-import entropydata.sdk.client.model.AssetColumnsInner;
+import entropydata.sdk.client.model.AssetColumn;
 import entropydata.sdk.client.model.AssetInfo;
 import java.util.List;
 import java.util.Map;
@@ -120,7 +120,7 @@ public class GcpAssetsProvider implements EntropyDataAssetsProvider {
         FieldList fields = schema.getFields();
         if (fields != null) {
           for (Field field : fields) {
-            asset.addColumnsItem(new AssetColumnsInner()
+            asset.addColumnsItem(new AssetColumn()
                 .name(field.getName())
                 .type(field.getType().name())
                 .description(field.getDescription()));
