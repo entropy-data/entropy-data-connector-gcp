@@ -2,7 +2,9 @@ package entropydata.gcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,7 +27,11 @@ import entropydata.sdk.client.api.TeamsApi;
 import entropydata.sdk.client.model.Access;
 import entropydata.sdk.client.model.AccessActivatedEvent;
 import entropydata.sdk.client.model.AccessDeactivatedEvent;
+import entropydata.sdk.client.model.AccessDeprovisioningSucceededReport;
 import entropydata.sdk.client.model.AccessProvider;
+import entropydata.sdk.client.model.AccessProvisioningFailedReport;
+import entropydata.sdk.client.model.AccessProvisioningStartedReport;
+import entropydata.sdk.client.model.AccessProvisioningSucceededReport;
 import entropydata.sdk.client.model.DataUsageAgreementConsumer;
 import entropydata.sdk.client.model.Team;
 import java.io.IOException;
@@ -329,6 +335,97 @@ class GcpAccessManagementTest {
 
       verify(dataProductsApi, never()).getDataProduct("unknown");
       verify(bigQuery, never()).getDataset(any(DatasetId.class));
+    }
+  }
+
+  // ===== Provisioning reporting =====
+
+  @Nested
+  class ProvisioningReporting {
+
+    @Test
+    void reportsProvisioningStartedThenSucceededOnGrant() {
+      var consumer = new DataUsageAgreementConsumer().dataProductId("consumer-dp");
+      var access = buildAccess("access-1", "provider-dp", "op-1", consumer);
+      when(accessApi.getAccess("access-1")).thenReturn(access);
+      when(dataProductsApi.getDataProduct("provider-dp")).thenReturn(loadYaml("provider-dp-dps.yaml"));
+      when(dataProductsApi.getDataProduct("consumer-dp")).thenReturn(loadYaml("consumer-dp-dps.yaml"));
+      mockDataset(DatasetId.of("my-project", "my-dataset"), new ArrayList<>());
+
+      var event = new AccessActivatedEvent();
+      event.setId("access-1");
+      accessManagement.onAccessActivatedEvent(event);
+
+      // started is reported before the grant, succeeded after it, with the dataset as reference
+      var order = inOrder(accessApi);
+      order.verify(accessApi).reportProvisioningStarted(eq("access-1"), any(AccessProvisioningStartedReport.class));
+      var succeeded = ArgumentCaptor.forClass(AccessProvisioningSucceededReport.class);
+      order.verify(accessApi).reportProvisioningSucceeded(eq("access-1"), succeeded.capture());
+      assertThat(succeeded.getValue().getPlatform()).isEqualTo("bigquery");
+      assertThat(succeeded.getValue().getReference()).isEqualTo("my-project.my-dataset");
+      verify(accessApi, never()).reportProvisioningFailed(anyString(), any());
+    }
+
+    @Test
+    void reportsProvisioningFailedWhenAuthorizeThrows() {
+      var consumer = new DataUsageAgreementConsumer().dataProductId("consumer-dp");
+      var access = buildAccess("access-1", "provider-dp", "op-1", consumer);
+      when(accessApi.getAccess("access-1")).thenReturn(access);
+      when(dataProductsApi.getDataProduct("provider-dp")).thenReturn(loadYaml("provider-dp-dps.yaml"));
+      when(dataProductsApi.getDataProduct("consumer-dp")).thenReturn(loadYaml("consumer-dp-dps.yaml"));
+      // the BigQuery call throws, which the handler must report and then swallow
+      when(bigQuery.getDataset(DatasetId.of("my-project", "my-dataset")))
+          .thenThrow(new RuntimeException("dataset boom"));
+
+      var event = new AccessActivatedEvent();
+      event.setId("access-1");
+      accessManagement.onAccessActivatedEvent(event);
+
+      var order = inOrder(accessApi);
+      order.verify(accessApi).reportProvisioningStarted(eq("access-1"), any(AccessProvisioningStartedReport.class));
+      var failed = ArgumentCaptor.forClass(AccessProvisioningFailedReport.class);
+      order.verify(accessApi).reportProvisioningFailed(eq("access-1"), failed.capture());
+      assertThat(failed.getValue().getDiagnostics()).isEqualTo("dataset boom");
+      verify(accessApi, never()).reportProvisioningSucceeded(anyString(), any());
+    }
+
+    @Test
+    void reportsDeprovisioningStartedThenSucceededOnRevoke() {
+      var consumer = new DataUsageAgreementConsumer().dataProductId("consumer-dp");
+      var access = buildAccess("access-1", "provider-dp", "op-1", consumer);
+      access.setTags(new ArrayList<>(List.of("permission-granted-on-gcp")));
+      when(accessApi.getAccess("access-1")).thenReturn(access);
+      when(dataProductsApi.getDataProduct("provider-dp")).thenReturn(loadYaml("provider-dp-dps.yaml"));
+      when(dataProductsApi.getDataProduct("consumer-dp")).thenReturn(loadYaml("consumer-dp-dps.yaml"));
+      var existingAcl = Acl.of(new User("sa@project.iam.gserviceaccount.com"), Role.READER);
+      mockDataset(DatasetId.of("my-project", "my-dataset"), new ArrayList<>(List.of(existingAcl)));
+
+      var event = new AccessDeactivatedEvent();
+      event.setId("access-1");
+      accessManagement.onAccessDeactivatedEvent(event);
+
+      var order = inOrder(accessApi);
+      order.verify(accessApi).reportDeprovisioningStarted(eq("access-1"), any(AccessProvisioningStartedReport.class));
+      var succeeded = ArgumentCaptor.forClass(AccessDeprovisioningSucceededReport.class);
+      order.verify(accessApi).reportDeprovisioningSucceeded(eq("access-1"), succeeded.capture());
+      assertThat(succeeded.getValue().getReference()).isEqualTo("my-project.my-dataset");
+    }
+
+    @Test
+    void doesNotReportProvisioningWhenNotApplicable() {
+      // the output port cannot be resolved to a BigQuery dataset, so another connector owns this access
+      var consumer = new DataUsageAgreementConsumer().dataProductId("consumer-dp");
+      var access = buildAccess("access-1", "provider-dp", "nonexistent-port", consumer);
+      when(accessApi.getAccess("access-1")).thenReturn(access);
+      when(dataProductsApi.getDataProduct("provider-dp")).thenReturn(loadYaml("provider-dp-dps.yaml"));
+
+      var event = new AccessActivatedEvent();
+      event.setId("access-1");
+      accessManagement.onAccessActivatedEvent(event);
+
+      verify(accessApi, never()).reportProvisioningStarted(anyString(), any());
+      verify(accessApi, never()).reportProvisioningSucceeded(anyString(), any());
+      verify(accessApi, never()).reportProvisioningFailed(anyString(), any());
     }
   }
 

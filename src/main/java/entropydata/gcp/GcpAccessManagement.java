@@ -14,6 +14,10 @@ import entropydata.sdk.client.ApiException;
 import entropydata.sdk.client.model.Access;
 import entropydata.sdk.client.model.AccessActivatedEvent;
 import entropydata.sdk.client.model.AccessDeactivatedEvent;
+import entropydata.sdk.client.model.AccessDeprovisioningSucceededReport;
+import entropydata.sdk.client.model.AccessProvisioningFailedReport;
+import entropydata.sdk.client.model.AccessProvisioningStartedReport;
+import entropydata.sdk.client.model.AccessProvisioningSucceededReport;
 import entropydata.sdk.client.model.DataProduct;
 import entropydata.sdk.client.model.Team;
 import java.util.ArrayList;
@@ -26,6 +30,11 @@ import org.slf4j.LoggerFactory;
 public class GcpAccessManagement implements EntropyDataEventHandler {
 
   private static final Logger log = LoggerFactory.getLogger(GcpAccessManagement.class);
+
+  // Reported back to Entropy Data on every provisioning transition, so the access page shows which
+  // platform holds the grant and which component created it.
+  private static final String PLATFORM = "bigquery";
+  private static final String EXECUTOR = "Entropy Data GCP Connector";
 
   private final EntropyDataClient client;
   private final BigQuery bigQuery;
@@ -52,6 +61,7 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
 
     var datasetId = findProviderDatasetId(access, client);
     if (datasetId == null) {
+      // not a BigQuery output port: another connector owns this access, so stay silent
       return;
     }
 
@@ -60,9 +70,18 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
       return;
     }
 
-    authorize(datasetId, entity);
-
-    addTag(accessId, "permission-granted-on-gcp");
+    reportProvisioningStarted(access);
+    try {
+      authorize(datasetId, entity);
+      addTag(accessId, "permission-granted-on-gcp");
+    } catch (RuntimeException e) {
+      log.error("Failed to authorize access {}", accessId, e);
+      reportProvisioningFailed(access, e);
+      // Swallow after reporting: the failure is now recorded and mailed to the provider, whereas
+      // rethrowing would stall the whole event feed on this one access until it is retried.
+      return;
+    }
+    reportProvisioningSucceeded(access, reference(datasetId));
   }
 
   @Override
@@ -73,6 +92,7 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
 
     var datasetId = findProviderDatasetId(access, client);
     if (datasetId == null) {
+      // not a BigQuery output port: another connector owns this access, so stay silent
       return;
     }
 
@@ -81,9 +101,80 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
       return;
     }
 
-    deauthorize(datasetId, entity);
+    reportDeprovisioningStarted(access);
+    try {
+      deauthorize(datasetId, entity);
+      removeTag(accessId, "permission-granted-on-gcp");
+    } catch (RuntimeException e) {
+      log.error("Failed to deauthorize access {}", accessId, e);
+      reportDeprovisioningFailed(access, e);
+      return;
+    }
+    reportDeprovisioningSucceeded(access, reference(datasetId));
+  }
 
-    removeTag(accessId, "permission-granted-on-gcp");
+  private static String reference(DatasetId datasetId) {
+    return datasetId.getProject() + "." + datasetId.getDataset();
+  }
+
+  private void reportProvisioningStarted(Access access) {
+    safeReport(access.getId(), "provisioning-started", () ->
+        client.getAccessApi().reportProvisioningStarted(access.getId(),
+            new AccessProvisioningStartedReport().platform(PLATFORM).executor(EXECUTOR)));
+  }
+
+  private void reportProvisioningSucceeded(Access access, String reference) {
+    safeReport(access.getId(), "provisioning-succeeded", () ->
+        client.getAccessApi().reportProvisioningSucceeded(access.getId(),
+            new AccessProvisioningSucceededReport().platform(PLATFORM).executor(EXECUTOR).reference(reference)));
+  }
+
+  private void reportProvisioningFailed(Access access, Exception cause) {
+    safeReport(access.getId(), "provisioning-failed", () ->
+        client.getAccessApi().reportProvisioningFailed(access.getId(),
+            new AccessProvisioningFailedReport().platform(PLATFORM).executor(EXECUTOR).diagnostics(diagnostics(cause))));
+  }
+
+  private void reportDeprovisioningStarted(Access access) {
+    safeReport(access.getId(), "deprovisioning-started", () ->
+        client.getAccessApi().reportDeprovisioningStarted(access.getId(),
+            new AccessProvisioningStartedReport().platform(PLATFORM).executor(EXECUTOR)));
+  }
+
+  private void reportDeprovisioningSucceeded(Access access, String reference) {
+    safeReport(access.getId(), "deprovisioning-succeeded", () ->
+        client.getAccessApi().reportDeprovisioningSucceeded(access.getId(),
+            new AccessDeprovisioningSucceededReport().platform(PLATFORM).executor(EXECUTOR).reference(reference)));
+  }
+
+  private void reportDeprovisioningFailed(Access access, Exception cause) {
+    safeReport(access.getId(), "deprovisioning-failed", () ->
+        client.getAccessApi().reportDeprovisioningFailed(access.getId(),
+            new AccessProvisioningFailedReport().platform(PLATFORM).executor(EXECUTOR).diagnostics(diagnostics(cause))));
+  }
+
+  /**
+   * Reports one transition, swallowing any failure. The grant itself is the source of truth; a
+   * report that cannot be delivered (e.g. the backend predates provisioning, or the API key lacks
+   * the provider's ACCESS_EDIT permission) must not undo or block the grant.
+   */
+  private void safeReport(String accessId, String transition, ReportCall call) {
+    try {
+      call.run();
+      log.info("Reported {} for access {}", transition, accessId);
+    } catch (Exception e) {
+      log.warn("Failed to report {} for access {}: {}", transition, accessId, e.getMessage());
+    }
+  }
+
+  private static String diagnostics(Exception cause) {
+    var message = cause.getMessage();
+    return message != null ? message : cause.getClass().getSimpleName();
+  }
+
+  @FunctionalInterface
+  private interface ReportCall {
+    void run() throws ApiException;
   }
 
   public void authorize(DatasetId datasetId, Entity entity) {
