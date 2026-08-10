@@ -51,7 +51,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: entropydata/entropy-data-connector-gcp:latest
+          tags: entropydata/entropy-data-connector-gcp:sha-${{ github.sha }}
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
