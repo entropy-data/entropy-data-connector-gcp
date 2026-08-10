@@ -35,7 +35,9 @@ entropydata/entropy-data-connector-gcp:0.3.0
 | `latest` | The most recent release. Moves with every release. |
 | `sha-<commit>` | A single commit on `main`, published so that a change can be tried out before it is released. |
 
-Release images are signed with [cosign](https://docs.sigstore.dev/), and carry an SBOM and build provenance:
+Release images are signed with [cosign](https://docs.sigstore.dev/), and carry an SBOM and build provenance.
+Verifying needs **cosign 3 or later**, because the signatures use the OCI referrers format that cosign 2 cannot read
+(it reports `no signatures found`):
 
 ```
 cosign verify entropydata/entropy-data-connector-gcp:0.3.0 \
