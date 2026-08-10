@@ -18,6 +18,9 @@ RUN useradd app
 USER app
 WORKDIR /app
 ENV OTEL_JAVAAGENT_ENABLED=false
+# Without this, the JVM caps the heap at 25% of the container memory. Overriding JAVA_TOOL_OPTIONS at
+# runtime replaces this value entirely, so any override must repeat the flags that should be kept.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError"
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
 COPY --from=build /app/extracted/dependencies/ ./
 COPY --from=build /app/extracted/spring-boot-loader/ ./

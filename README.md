@@ -35,3 +35,35 @@ docker run \
 | `ENTROPYDATA_CLIENT_GCP_ASSETS_ENABLED`                           | `true`                             | Indicates whether GCP asset tracking is enabled.                                |
 | `ENTROPYDATA_CLIENT_GCP_ASSETS_POLLINTERVAL`                      | `PT5S`                             | Polling interval for GCP asset updates, in ISO 8601 duration format.            |
 | `ENTROPYDATA_CLIENT_GCP_ASSETS_TABLES_ALLOWLIST`                  | `*`                                | List of allowed tables for GCP asset tracking (wildcard `*` allows all tables). |
+
+## Resources
+
+The connector needs **at least 1 GB of container memory**. The image sets a heap limit accordingly:
+
+```
+JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError
+```
+
+Without `MaxRAMPercentage`, the JVM caps the heap at 25% of the container memory. `ExitOnOutOfMemoryError` terminates the
+container instead of leaving it running with a dead synchronization thread, so that your orchestrator can restart it.
+
+Setting `JAVA_TOOL_OPTIONS` at runtime **replaces** these flags rather than adding to them. Repeat the flags you want to keep:
+
+```
+-e JAVA_TOOL_OPTIONS='-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError -javaagent:/agent.jar'
+```
+
+Expect the container to use around 60% of its memory limit under load. Adjust memory alarms accordingly.
+
+### Synchronization Health
+
+The health endpoint reports whether the asset synchronization is still up to date:
+
+```
+curl http://localhost:8080/actuator/health
+```
+
+The `assetsSynchronizationHealth` component reports `DEGRADED` when the last run failed, or when no run has succeeded for three
+poll intervals, and names the failure in `lastFailure`. It is deliberately not reported as `DOWN`, and the endpoint still responds
+with 200, because the usual cause is an unavailable data platform, which restarting the container does not fix. Point liveness
+probes at `/actuator/health/liveness`, which is unaffected by the synchronization state.
