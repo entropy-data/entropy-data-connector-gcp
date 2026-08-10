@@ -33,7 +33,7 @@
 		<dependency>
 			<groupId>com.entropy-data</groupId>
 			<artifactId>entropy-data-sdk</artifactId>
-			<version>0.2.1</version>
+			<version>0.3.0</version>
 		</dependency>
 
     <dependency>
@@ -70,6 +70,14 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<!-- Provides the BuildProperties bean, so the connector can report the version it runs with -->
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 	</build>
