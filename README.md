@@ -54,3 +54,16 @@ Setting `JAVA_TOOL_OPTIONS` at runtime **replaces** these flags rather than addi
 ```
 
 Expect the container to use around 60% of its memory limit under load. Adjust memory alarms accordingly.
+
+### Synchronization Health
+
+The health endpoint reports whether the asset synchronization is still up to date:
+
+```
+curl http://localhost:8080/actuator/health
+```
+
+The `assetsSynchronizationHealth` component reports `DEGRADED` when the last run failed, or when no run has succeeded for three
+poll intervals, and names the failure in `lastFailure`. It is deliberately not reported as `DOWN`, and the endpoint still responds
+with 200, because the usual cause is an unavailable data platform, which restarting the container does not fix. Point liveness
+probes at `/actuator/health/liveness`, which is unaffected by the synchronization state.

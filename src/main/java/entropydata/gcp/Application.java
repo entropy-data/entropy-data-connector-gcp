@@ -48,14 +48,22 @@ public class Application {
     return listener;
   }
 
+  @Bean
+  @ConditionalOnProperty(value = "entropydata.client.gcp.assets.enabled", havingValue = "true")
+  public AssetsSynchronizationHealth assetsSynchronizationHealth() {
+    // This connector does not configure a poll interval, so the synchronizer runs with its own default
+    return new AssetsSynchronizationHealth(null);
+  }
+
   @Bean(destroyMethod = "stop")
   @ConditionalOnProperty(value = "entropydata.client.gcp.assets.enabled", havingValue = "true")
   public EntropyDataAssetsSynchronizer entropyDataAssetsSynchronizer(EntropyDataClient client, GcpProperties gcpProperties,
-      BigQuery bigQuery, TaskExecutor taskExecutor) {
+      BigQuery bigQuery, AssetsSynchronizationHealth assetsSynchronizationHealth, TaskExecutor taskExecutor) {
     var connectorid = gcpProperties.assets().connectorid();
     var stateRepository = new EntropyDataStateRepositoryInMemory(connectorid);
     var assetsProvider = new GcpAssetsProvider(bigQuery, gcpProperties.assets().projects(), stateRepository);
-    var assetsSynchronizer = new EntropyDataAssetsSynchronizer(connectorid, client, assetsProvider);
+    var assetsSynchronizer = new EntropyDataAssetsSynchronizer(connectorid, client,
+        assetsSynchronizationHealth.wrap(assetsProvider));
     taskExecutor.execute(assetsSynchronizer::start);
     return assetsSynchronizer;
   }
