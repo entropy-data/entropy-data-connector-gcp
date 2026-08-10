@@ -35,3 +35,22 @@ docker run \
 | `ENTROPYDATA_CLIENT_GCP_ASSETS_ENABLED`                           | `true`                             | Indicates whether GCP asset tracking is enabled.                                |
 | `ENTROPYDATA_CLIENT_GCP_ASSETS_POLLINTERVAL`                      | `PT5S`                             | Polling interval for GCP asset updates, in ISO 8601 duration format.            |
 | `ENTROPYDATA_CLIENT_GCP_ASSETS_TABLES_ALLOWLIST`                  | `*`                                | List of allowed tables for GCP asset tracking (wildcard `*` allows all tables). |
+
+## Resources
+
+The connector needs **at least 1 GB of container memory**. The image sets a heap limit accordingly:
+
+```
+JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError
+```
+
+Without `MaxRAMPercentage`, the JVM caps the heap at 25% of the container memory. `ExitOnOutOfMemoryError` terminates the
+container instead of leaving it running with a dead synchronization thread, so that your orchestrator can restart it.
+
+Setting `JAVA_TOOL_OPTIONS` at runtime **replaces** these flags rather than adding to them. Repeat the flags you want to keep:
+
+```
+-e JAVA_TOOL_OPTIONS='-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError -javaagent:/agent.jar'
+```
+
+Expect the container to use around 60% of its memory limit under load. Adjust memory alarms accordingly.
