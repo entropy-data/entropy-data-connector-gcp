@@ -21,6 +21,28 @@ docker run \
   entropydata/entropy-data-connector-gcp:latest
 ```
 
+## Versions
+
+Every release is published as an immutable image tag. Pin a version rather than following `latest`:
+
+```
+entropydata/entropy-data-connector-gcp:0.9.0
+```
+
+| Tag | Meaning |
+|---|---|
+| `X.Y.Z` | A released version. Immutable, and the recommended way to run the connector. |
+| `latest` | The most recent release. Moves with every release. |
+| `sha-<commit>` | A single commit on `main`, published so that a change can be tried out before it is released. |
+
+Release images are signed with [cosign](https://docs.sigstore.dev/), and carry an SBOM and build provenance:
+
+```
+cosign verify entropydata/entropy-data-connector-gcp:0.9.0 \
+  --certificate-identity-regexp 'https://github.com/entropy-data/entropy-data-connector-gcp/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Configuration
 
 | Environment Variable                                                         | Default Value                      | Description                                                                            |
