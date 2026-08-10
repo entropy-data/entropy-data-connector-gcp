@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       TAG_NAME:
-        description: Tag name to be used for the docker build, e.g., 0.9.0
+        description: Tag name to be used for the docker build, e.g., 0.3.0
         required: true
 
 env:
