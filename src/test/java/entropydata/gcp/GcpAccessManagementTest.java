@@ -1,6 +1,7 @@
 package entropydata.gcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -480,6 +481,50 @@ class GcpAccessManagementTest {
       accessManagement.onAccessActivatedEvent(event);
 
       verify(bigQuery).getDataset(datasetId);
+    }
+  }
+
+  // ===== Deleted access =====
+
+  @Nested
+  class DeletedAccess {
+
+    @Test
+    void skipsDeactivatedEventWhenAccessIsGone() {
+      // deleting an active access writes the deactivated event first; by the time it is polled the GET answers 404
+      when(accessApi.getAccess("access-1")).thenThrow(new ApiException(404, "Not Found"));
+
+      var event = new AccessDeactivatedEvent();
+      event.setId("access-1");
+      accessManagement.onAccessDeactivatedEvent(event);
+
+      verify(bigQuery, never()).getDataset(any(DatasetId.class));
+      verify(accessApi, never()).reportDeprovisioningStarted(anyString(), any());
+      verify(accessApi, never()).addAccess(anyString(), any());
+    }
+
+    @Test
+    void skipsActivatedEventWhenAccessIsGone() {
+      when(accessApi.getAccess("access-1")).thenThrow(new ApiException(404, "Not Found"));
+
+      var event = new AccessActivatedEvent();
+      event.setId("access-1");
+      accessManagement.onAccessActivatedEvent(event);
+
+      verify(bigQuery, never()).getDataset(any(DatasetId.class));
+      verify(accessApi, never()).reportProvisioningStarted(anyString(), any());
+    }
+
+    @Test
+    void stillFailsOnOtherApiErrors() {
+      when(accessApi.getAccess("access-1")).thenThrow(new ApiException(500, "Internal Server Error"));
+
+      var event = new AccessDeactivatedEvent();
+      event.setId("access-1");
+
+      assertThatThrownBy(() -> accessManagement.onAccessDeactivatedEvent(event))
+          .isInstanceOf(ApiException.class);
+      verify(bigQuery, never()).getDataset(any(DatasetId.class));
     }
   }
 }
