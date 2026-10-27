@@ -57,7 +57,11 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
   public void onAccessActivatedEvent(AccessActivatedEvent event) {
     String accessId = event.getId();
     log.info("Processing AccessActivatedEvent {}", accessId);
-    var access = client.getAccessApi().getAccess(accessId);
+    var access = getAccess(accessId);
+    if (access == null) {
+      log.info("Access {} not found, skip granting permissions", accessId);
+      return;
+    }
 
     var datasetId = findProviderDatasetId(access, client);
     if (datasetId == null) {
@@ -88,7 +92,11 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
   public void onAccessDeactivatedEvent(AccessDeactivatedEvent event) {
     String accessId = event.getId();
     log.info("Processing AccessDeactivatedEvent {}", accessId);
-    var access = client.getAccessApi().getAccess(accessId);
+    var access = getAccess(accessId);
+    if (access == null) {
+      log.info("Access {} not found, skip revoking permissions", accessId);
+      return;
+    }
 
     var datasetId = findProviderDatasetId(access, client);
     if (datasetId == null) {
@@ -111,6 +119,23 @@ public class GcpAccessManagement implements EntropyDataEventHandler {
       return;
     }
     reportDeprovisioningSucceeded(access, reference(datasetId));
+  }
+
+  /**
+   * The access, or null when the API answers 404. An access deleted right after its event was written is
+   * gone by the time the feed delivers the event; rethrowing would make the listener retry the same event
+   * every 30 seconds without ever advancing past it.
+   */
+  private Access getAccess(String accessId) {
+    try {
+      return client.getAccessApi().getAccess(accessId);
+    } catch (ApiException e) {
+      if (e.getCode() == 404) {
+        log.info("Access {} not found", accessId);
+        return null;
+      }
+      throw e;
+    }
   }
 
   private static String reference(DatasetId datasetId) {
